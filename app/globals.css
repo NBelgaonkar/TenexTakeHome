@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background-color: #07090c;
+  background-image:
+    radial-gradient(1200px 520px at 8% -10%, rgba(62, 224, 197, 0.09), transparent 55%),
+    radial-gradient(900px 480px at 100% 0%, rgba(91, 141, 239, 0.07), transparent 50%),
+    linear-gradient(180deg, #07090c 0%, #0c1117 100%);
+  color: #e8eef4;
+}
+
+.grid-overlay {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-line bg-ink-800/90 shadow-panel backdrop-blur-sm;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-mist/35 bg-ink-700 px-3 py-2 text-sm text-foam outline-none transition placeholder:text-mist/50 focus:border-signal/70 focus:ring-1 focus:ring-signal/40;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-signal text-ink-950 hover:bg-signal/90;
+  }
+
+  .btn-ghost {
+    @apply btn border border-line bg-transparent text-foam hover:border-signal/40 hover:text-signal;
+  }
+}
