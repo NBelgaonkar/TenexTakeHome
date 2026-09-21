@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fallbackExplanation, selectHitsForLlm } from "@/lib/anomaly/llm";
 import { runAnomalyPipeline } from "@/lib/anomaly/pipeline";
 import {
@@ -222,6 +222,7 @@ describe("LLM cap", () => {
   it("persists every Stage 1 hit, including large_transfer and rare_domain past 25 off_hours", async () => {
     const previousKey = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     try {
       const weekend = Array.from({ length: 26 }, (_, i) =>
@@ -257,6 +258,7 @@ describe("LLM cap", () => {
         true,
       );
     } finally {
+      warnSpy.mockRestore();
       if (previousKey === undefined) {
         delete process.env.ANTHROPIC_API_KEY;
       } else {

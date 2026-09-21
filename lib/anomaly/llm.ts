@@ -81,10 +81,24 @@ export async function explainAnomalies(
   });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || toSend.length === 0) return flagged;
+  if (!apiKey) {
+    if (toSend.length > 0) {
+      console.warn("ANTHROPIC_API_KEY not set, using template explanations");
+    }
+    return flagged;
+  }
+  if (toSend.length === 0) return flagged;
 
   try {
     const llm = await callClaude(apiKey, toSend);
+    console.info(
+      `Claude explanations: sent ${toSend.length}, returned ${llm.length}`,
+    );
+    if (llm.length < toSend.length) {
+      console.warn(
+        `Claude returned ${llm.length} explanations for ${toSend.length} findings; using templates for the rest`,
+      );
+    }
     return flagged.map((item) => {
       const sendIndex = toSend.indexOf(item);
       if (sendIndex < 0) return item;
@@ -100,7 +114,10 @@ export async function explainAnomalies(
         },
       };
     });
-  } catch {
+  } catch (err) {
+    const { name, status, message } = describeCaughtError(err);
+    const statusPart = status !== undefined ? ` status=${status}` : "";
+    console.error(`Claude explanation call failed: ${name}${statusPart} ${message}`);
     return flagged;
   }
 }
@@ -275,4 +292,19 @@ function clampConfidence(value: number): number {
 function normalizeSeverity(value: string): Severity {
   if (value === "low" || value === "medium" || value === "high") return value;
   return "medium";
+}
+
+function describeCaughtError(err: unknown): {
+  name: string;
+  message: string;
+  status?: number;
+} {
+  const name = err instanceof Error ? err.name : "Error";
+  const message = err instanceof Error ? err.message : "unknown error";
+  let status: number | undefined;
+  if (err && typeof err === "object" && "status" in err) {
+    const raw = (err as { status: unknown }).status;
+    if (typeof raw === "number") status = raw;
+  }
+  return { name, message, status };
 }

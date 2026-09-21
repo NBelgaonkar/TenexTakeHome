@@ -3,7 +3,7 @@ import { runAnomalyPipeline } from "@/lib/anomaly/pipeline";
 import { requireUser } from "@/lib/auth";
 import { chunk } from "@/lib/format";
 import { parseLogFile } from "@/lib/parser/zscaler";
-import { rateLimit } from "@/lib/rate-limit";
+import { checkRateLimit, rateLimitKey } from "@/lib/rate-limit";
 import { validateUpload } from "@/lib/upload/validate";
 
 export const runtime = "nodejs";
@@ -16,11 +16,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limited = rateLimit(`upload:${user.id}`, 10, 60 * 60 * 1000);
-  if (!limited.ok) {
+  const limited = await checkRateLimit(
+    rateLimitKey("upload-user", user.id),
+    10,
+    60 * 60,
+  );
+  if (!limited.allowed) {
     return NextResponse.json(
       { error: "Upload rate limit exceeded. Try again later." },
-      { status: 429 },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSeconds) },
+      },
     );
   }
 

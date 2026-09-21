@@ -102,8 +102,10 @@ Every name below is read via `process.env` in application code. Next.js also set
 | `ANOMALY_RATE_WINDOW_SECONDS` | No | `60` | `lib/anomaly/rules.ts` |
 | `ANOMALY_TRANSFER_MEDIAN_MULTIPLIER` | No | `10` | `lib/anomaly/rules.ts` |
 | `ANOMALY_TRANSFER_FLOOR_BYTES` | No | `5242880` (5MB) | `lib/anomaly/rules.ts` |
+| `UPSTASH_REDIS_REST_URL` | No | unset: in-memory limiter | `lib/rate-limit.ts` |
+| `UPSTASH_REDIS_REST_TOKEN` | No | unset: in-memory limiter | `lib/rate-limit.ts` |
 
-The TLD denylist is not an env var. It is hardcoded in `DEFAULT_RULE_CONFIG.suspiciousTlds`.
+The TLD denylist is not an env var. It is hardcoded in `DEFAULT_RULE_CONFIG.suspiciousTlds`. Upstash vars are only needed when you want rate limits to hold across multiple serverless instances.
 
 ## Try it
 
@@ -167,7 +169,7 @@ The system prompt states that event fields (URLs, IPs, user agents) are untruste
 
 `parseLlmItems` keeps only objects with the expected types. `clampConfidence` maps non-finite values to 0.5 and clamps to 0-1 (two decimal places). Unknown severity becomes `medium`. Missing tool output leaves the templates in place.
 
-If `ANTHROPIC_API_KEY` is missing, or `callClaude` throws, `explainAnomalies` returns those templates. The `catch` block does **not** log the error.
+If `ANTHROPIC_API_KEY` is missing, or `callClaude` throws, `explainAnomalies` returns those templates. Missing key logs `console.warn`. A thrown call logs `console.error` with the error name, HTTP status if present, and `error.message` (never the payload, headers, or API key). Success logs `console.info` with findings sent vs explanations returned.
 
 ### e. Confidence scores
 
@@ -227,7 +229,7 @@ npm run generate:logs
 - `POST /api/logs/upload`, summary, and anomalies call `getUser()`. Summary and anomalies also filter `log_sessions` by `user_id` before returning rows. Login and logout do not do an ownership check (login has no session yet; logout only calls `signOut`).
 - RLS on `log_sessions`, `log_entries`, and `anomalies`. Storage bucket `log-files` is private; object paths start with `auth.uid()`.
 - Upload checks: `.log` / `.txt`, 10MB, Content-Type `text/plain` or `application/octet-stream` (or empty), no NUL bytes, deny-listed magic bytes, >= 85% printable in the first 8KB.
-- Rate limits in `lib/rate-limit.ts`: **5 login attempts per minute per IP**, **10 uploads per hour per user**. In-memory `Map`, per process, not shared across serverless isolates.
+- Rate limits in `lib/rate-limit.ts`: **5 login attempts per minute per IP**, **10 login attempts per 15 minutes per email** (lowercased), **10 uploads per hour per user**. Uses Upstash Redis when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set; otherwise an in-memory `Map` per process. If Redis throws, that request falls back to memory (logged, not fail-open).
 
 See [SECURITY.md](SECURITY.md).
 
@@ -237,10 +239,14 @@ See [SECURITY.md](SECURITY.md).
 npm test
 ```
 
-Vitest (watch: `npm run test:watch`). **21** tests in 2 files:
+Vitest (watch: `npm run test:watch`). Tests live under `__tests__/`:
 
-- `__tests__/parser.test.ts` (6): NSS field mapping, malformed line, bad timestamp, non-IP, skip/count, `normal.log` parse range
-- `__tests__/anomaly.test.ts` (15): each rule, `normal.log` has 0 hits, `anomalous.log` has all four rule types (including the Zoom non-flag), LLM cap persistence, `selectHitsForLlm` order
+- `__tests__/parser.test.ts`: NSS field mapping, malformed line, bad timestamp, non-IP, skip/count, `normal.log` parse range
+- `__tests__/anomaly.test.ts`: each rule, `normal.log` has 0 hits, `anomalous.log` has all four rule types (including the Zoom non-flag), LLM cap persistence, `selectHitsForLlm` order
+- `__tests__/llm.test.ts`: Claude error logging, success `console.info`, missing-key warn; mocked SDK, no network
+- `__tests__/rate-limit.test.ts`: in-memory allow/block/reset, Upstash throw fallback, namespaced keys
+- `__tests__/upload-validate.test.ts`: `looksLikeTextLog` and `validateUpload` (extensions, size cap, empty, Content-Type, binary)
+- `__tests__/auth.test.ts`: login/logout/upload/summary/anomalies status codes and middleware gate; Supabase and limiter mocked
 
 ## Deployment
 
@@ -260,7 +266,7 @@ The upload route sets `maxDuration = 60`. Confirm the function timeout on your V
 
 ## Known limitations and next steps
 
-- Rate limiter is in-memory per process, not shared.
+- Rate limiter is shared (Upstash Redis) when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, and in-memory per process otherwise.
 - Parse and Stage 2 run synchronously on upload.
 - `rare_domain` flags any domain seen once, so it is noisy on large real logs.
 - Confidence is not a calibrated probability.

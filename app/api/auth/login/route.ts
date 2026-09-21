@@ -1,18 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { checkRateLimit, clientIp, rateLimitKey } from "@/lib/rate-limit";
 
 export async function POST(request: Request) {
   const ip = clientIp(request);
-  const limited = rateLimit(`login:${ip}`, 5, 60_000);
-  if (!limited.ok) {
-    return NextResponse.json(
-      { error: "Too many login attempts. Try again shortly." },
-      {
-        status: 429,
-        headers: { "Retry-After": String(Math.ceil(limited.retryAfterMs / 1000)) },
-      },
-    );
+  const ipLimited = await checkRateLimit(rateLimitKey("login-ip", ip), 5, 60);
+  if (!ipLimited.allowed) {
+    return tooManyAttempts(ipLimited.retryAfterSeconds);
   }
 
   let body: { email?: string; password?: string };
@@ -28,6 +22,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
   }
 
+  const emailLimited = await checkRateLimit(
+    rateLimitKey("login-email", email.toLowerCase()),
+    10,
+    15 * 60,
+  );
+  if (!emailLimited.allowed) {
+    return tooManyAttempts(emailLimited.retryAfterSeconds);
+  }
+
   const supabase = createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
@@ -35,4 +38,14 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+function tooManyAttempts(retryAfterSeconds: number) {
+  return NextResponse.json(
+    { error: "Too many login attempts. Try again shortly." },
+    {
+      status: 429,
+      headers: { "Retry-After": String(retryAfterSeconds) },
+    },
+  );
 }
