@@ -86,6 +86,7 @@ function anomalousLines() {
   const lines = normalLines();
   const ua = UAS[0];
 
+  // Original burst: 25 requests in 25s from 10.9.9.9 → office.com at 16:00 GMT (noon EDT).
   for (let i = 0; i < 25; i += 1) {
     const date = new Date(Date.UTC(2024, 2, 11, 16, 0, i));
     lines.push(
@@ -102,6 +103,25 @@ function anomalousLines() {
     );
   }
 
+  // Second burst: 28 requests, 2s apart (~54s window) from a different IP, late
+  // afternoon, to Salesforce — distinct incident from the office.com noon burst.
+  for (let i = 0; i < 28; i += 1) {
+    const date = new Date(Date.UTC(2024, 2, 11, 20, 10, i * 2));
+    lines.push(
+      line({
+        date,
+        ip: "10.4.4.20",
+        user: "frank@corp.com",
+        url: "https://login.salesforce.com/",
+        action: "Allowed",
+        sent: 640,
+        recv: 1100,
+        ua,
+      }),
+    );
+  }
+
+  // Original off-hours: Tue 07:10 GMT = 03:10 EDT, before 08:00 business start.
   for (let i = 0; i < 4; i += 1) {
     const date = new Date(Date.UTC(2024, 2, 12, 7, 10, i * 15));
     lines.push(
@@ -118,6 +138,7 @@ function anomalousLines() {
     );
   }
 
+  // Original large transfer: ~50MB Office export (above the 5MB floor).
   lines.push(
     line({
       date: new Date(Date.UTC(2024, 2, 11, 18, 30, 0)),
@@ -131,6 +152,42 @@ function anomalousLines() {
     }),
   );
 
+  // Zoom heartbeats so zoom.us is not a first-seen / rare_domain hit.
+  for (const minute of [12, 28, 51]) {
+    lines.push(
+      line({
+        date: new Date(Date.UTC(2024, 2, 11, 15, minute, 0)),
+        ip: "10.20.30.10",
+        user: "alice@corp.com",
+        url: "https://zoom.us/j/heartbeat",
+        action: "Allowed",
+        sent: 900,
+        recv: 2400,
+        ua,
+      }),
+    );
+  }
+
+  // FALSE-POSITIVE large_transfer: ~4.2MB Zoom recording from a normal IP during
+  // business hours. Session median is ~10KB so max(10×median, 5MB) = 5MB; this
+  // row is deliberately under that floor (a 15–20MB download would be flagged).
+  lines.push(
+    "# FALSE-POSITIVE large_transfer: Zoom recording 10.20.30.10 → zoom.us ~4.2MB at 15:40 GMT. Below max(10x session median, 5MB)=5MB; must stay unflagged.",
+  );
+  lines.push(
+    line({
+      date: new Date(Date.UTC(2024, 2, 11, 15, 40, 0)),
+      ip: "10.20.30.10",
+      user: "alice@corp.com",
+      url: "https://zoom.us/recording/download",
+      action: "Allowed",
+      sent: 120_000,
+      recv: 4_194_304,
+      ua,
+    }),
+  );
+
+  // Original rare / denylisted TLD: .xyz
   lines.push(
     line({
       date: new Date(Date.UTC(2024, 2, 11, 19, 5, 0)),
@@ -140,6 +197,48 @@ function anomalousLines() {
       action: "Allowed",
       sent: 512,
       recv: 2048,
+      ua,
+    }),
+  );
+
+  // Additional rare_domain: first-seen vendor portal (legitimate TLD, appears once).
+  lines.push(
+    line({
+      date: new Date(Date.UTC(2024, 2, 11, 17, 12, 0)),
+      ip: "10.20.30.13",
+      user: "dave@corp.com",
+      url: "https://portal.docusign.net/signing",
+      action: "Allowed",
+      sent: 1400,
+      recv: 3200,
+      ua,
+    }),
+  );
+
+  // Additional rare_domain: another first-seen but plausible corporate destination.
+  lines.push(
+    line({
+      date: new Date(Date.UTC(2024, 2, 11, 17, 48, 0)),
+      ip: "10.20.30.11",
+      user: "bob@corp.com",
+      url: "https://status.pagerduty.com/",
+      action: "Allowed",
+      sent: 780,
+      recv: 2100,
+      ua,
+    }),
+  );
+
+  // Additional rare_domain: denylisted TLD other than .xyz (proves the list isn't a single-case check).
+  lines.push(
+    line({
+      date: new Date(Date.UTC(2024, 2, 11, 19, 22, 0)),
+      ip: "10.20.30.12",
+      user: "carol@corp.com",
+      url: "https://payload-cdn.click/beacon",
+      action: "Allowed",
+      sent: 384,
+      recv: 1536,
       ua,
     }),
   );

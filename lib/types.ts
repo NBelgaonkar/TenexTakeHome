@@ -38,6 +38,10 @@ export type Severity = "low" | "medium" | "high";
 export interface RuleHit {
   entryIndex: number;
   rule: AnomalyRule;
+  /** Size of a grouped finding (high_request_rate burst). Defaults to 1. */
+  entryCount?: number;
+  /** Log indexes covered by a grouped finding, including entryIndex. */
+  relatedEntryIndexes?: number[];
 }
 
 export interface AnomalyExplanation {

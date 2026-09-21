@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { fallbackExplanation } from "@/lib/anomaly/llm";
 import {
   DEFAULT_RULE_CONFIG,
   detectAnomalies,
@@ -27,16 +28,58 @@ function entry(overrides: Partial<LogEntry>): LogEntry {
 }
 
 describe("high_request_rate", () => {
-  it("flags every event in a window that exceeds the threshold", () => {
+  it("collapses a violating window into one grouped hit", () => {
     const entries = Array.from({ length: 20 }, (_, i) =>
+      entry({
+        sourceIp: "10.9.9.9",
+        destUrl: "https://www.office.com/",
+        timestamp: new Date(Date.UTC(2024, 2, 11, 16, 0, i)).toISOString(),
+      }),
+    );
+    const hits = detectHighRequestRate(entries, DEFAULT_RULE_CONFIG);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toEqual({
+      entryIndex: 0,
+      rule: "high_request_rate",
+      entryCount: 20,
+      relatedEntryIndexes: Array.from({ length: 20 }, (_, i) => i),
+    });
+    const copy = fallbackExplanation("high_request_rate", entries[0], {
+      entryCount: 20,
+      rateWindowSeconds: DEFAULT_RULE_CONFIG.rateWindowSeconds,
+    });
+    expect(copy.explanation).toBe(
+      "IP 10.9.9.9 made 20 requests to https://www.office.com/ in under 60 seconds.",
+    );
+  });
+
+  it("emits one grouped hit per contiguous violating window", () => {
+    const burst = (startSec: number) =>
+      Array.from({ length: 20 }, (_, i) =>
+        entry({
+          sourceIp: "10.9.9.9",
+          timestamp: new Date(
+            Date.UTC(2024, 2, 11, 16, 0, startSec + i),
+          ).toISOString(),
+        }),
+      );
+    const entries = [...burst(0), ...burst(120)];
+    const hits = detectHighRequestRate(entries, DEFAULT_RULE_CONFIG);
+    expect(hits).toHaveLength(2);
+    expect(hits[0].entryIndex).toBe(0);
+    expect(hits[0].entryCount).toBe(20);
+    expect(hits[1].entryIndex).toBe(20);
+    expect(hits[1].entryCount).toBe(20);
+  });
+
+  it("does not flag a window below the threshold", () => {
+    const entries = Array.from({ length: 19 }, (_, i) =>
       entry({
         sourceIp: "10.9.9.9",
         timestamp: new Date(Date.UTC(2024, 2, 11, 16, 0, i)).toISOString(),
       }),
     );
-    const hits = detectHighRequestRate(entries, DEFAULT_RULE_CONFIG);
-    expect(hits).toHaveLength(20);
-    expect(hits.every((h) => h.rule === "high_request_rate")).toBe(true);
+    expect(detectHighRequestRate(entries, DEFAULT_RULE_CONFIG)).toEqual([]);
   });
 });
 
@@ -89,5 +132,76 @@ describe("normal traffic fixture", () => {
     const { entries } = parseLogFile(file);
     expect(entries.length).toBeGreaterThan(0);
     expect(detectAnomalies(entries, DEFAULT_RULE_CONFIG)).toEqual([]);
+  });
+});
+
+describe("anomalous traffic fixture", () => {
+  const file = readFileSync(
+    path.join(process.cwd(), "sample-logs", "anomalous.log"),
+    "utf8",
+  );
+  const { entries } = parseLogFile(file);
+
+  it("groups two distinct high_request_rate bursts", () => {
+    const rateHits = detectHighRequestRate(entries, DEFAULT_RULE_CONFIG);
+    expect(rateHits).toHaveLength(2);
+    const bursts = rateHits.map((hit) => ({
+      ip: entries[hit.entryIndex].sourceIp,
+      dest: entries[hit.entryIndex].destUrl,
+      count: hit.entryCount,
+    }));
+    expect(bursts).toEqual(
+      expect.arrayContaining([
+        {
+          ip: "10.9.9.9",
+          dest: "https://www.office.com/",
+          count: 25,
+        },
+        {
+          ip: "10.4.4.20",
+          dest: "https://login.salesforce.com/",
+          count: 28,
+        },
+      ]),
+    );
+  });
+
+  it("still flags the original off-hours GitHub access", () => {
+    const hits = detectOffHours(entries, DEFAULT_RULE_CONFIG);
+    const urls = hits.map((hit) => entries[hit.entryIndex].destUrl);
+    expect(hits.length).toBeGreaterThanOrEqual(4);
+    expect(urls.every((url) => url.includes("github.com"))).toBe(true);
+  });
+
+  it("flags original and additional rare domains, including a non-xyz denylist TLD", () => {
+    const hits = detectRareDomain(entries, DEFAULT_RULE_CONFIG);
+    const urls = hits.map((hit) => entries[hit.entryIndex].destUrl);
+    expect(urls).toEqual(
+      expect.arrayContaining([
+        "https://steal-session.xyz/login",
+        "https://portal.docusign.net/signing",
+        "https://status.pagerduty.com/",
+        "https://payload-cdn.click/beacon",
+      ]),
+    );
+    expect(urls.some((url) => url.includes(".xyz"))).toBe(true);
+    expect(urls.some((url) => url.includes(".click"))).toBe(true);
+  });
+
+  it("flags the ~50MB export and not the Zoom recording below the 5MB floor", () => {
+    const hits = detectLargeTransfer(entries, DEFAULT_RULE_CONFIG);
+    const flaggedUrls = hits.map((hit) => entries[hit.entryIndex].destUrl);
+    expect(flaggedUrls).toContain("https://www.office.com/share/export");
+    expect(flaggedUrls.some((url) => url.includes("zoom.us"))).toBe(false);
+
+    const zoom = entries.find((e) =>
+      e.destUrl.includes("zoom.us/recording/download"),
+    );
+    expect(zoom).toBeDefined();
+    const total = (zoom?.bytesSent ?? 0) + (zoom?.bytesReceived ?? 0);
+    // Typical session rows are ~10KB, so max(10×median, 5MB) is the 5MB floor.
+    // This ~4.2MB Zoom recording must stay unflagged; 15–20MB would not.
+    expect(total).toBeGreaterThan(3 * 1024 * 1024);
+    expect(total).toBeLessThan(DEFAULT_RULE_CONFIG.transferFloorBytes);
   });
 });

@@ -25,7 +25,7 @@ There is no separate Express server. All backend logic lives in Next.js Route Ha
 
 **Stage 1 — deterministic heuristics** (`lib/anomaly/rules.ts`). No LLM, no API cost:
 
-- `high_request_rate` — same source IP ≥ 20 requests in a 60s sliding window (every event in a violating window is flagged)
+- `high_request_rate` — same source IP ≥ 20 requests in a 60s sliding window (one grouped finding per contiguous violating burst)
 - `off_hours` — outside 08:00–18:00 **America/New_York** on weekdays; weekends count as off-hours
 - `large_transfer` — `bytesSent + bytesReceived` ≥ `max(10 × session median, 5MB)`
 - `rare_domain` — registrable domain appears once in the session **or** the TLD is on a small denylist (`.xyz`, `.tk`, `.top`, `.click`, `.gq`, `.ml`, `.cf`, `.zip`)
@@ -50,7 +50,7 @@ Mon Oct 16 22:55:48 2023	GMT	10.1.2.3	jdoe@corp.com	https://www.office.com/	Allo
 
 `login` is parsed then dropped. `time` + `tz` normalize to ISO-8601. Malformed lines are skipped; the session fails only if **zero** lines parse.
 
-Sample files: `sample-logs/normal.log` (~180 benign weekday lines) and `sample-logs/anomalous.log` (same baseline plus a request burst, off-hours access, a ~50MB transfer, and a `.xyz` destination). Regenerate with `npm run generate:logs`.
+Sample files: `sample-logs/normal.log` (~180 benign weekday lines) and `sample-logs/anomalous.log` (same baseline plus two request bursts, off-hours access, a ~50MB transfer, rare / denylisted domains, and a ~4MB Zoom download that stays under the large-transfer threshold). Regenerate with `npm run generate:logs`.
 
 ## Local setup
 

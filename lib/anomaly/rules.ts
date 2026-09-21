@@ -79,7 +79,7 @@ export function detectHighRequestRate(
     byIp.set(entry.sourceIp, list);
   });
 
-  const flagged = new Set<number>();
+  const hits: RuleHit[] = [];
   const windowMs = config.rateWindowSeconds * 1000;
 
   byIp.forEach((indexes) => {
@@ -88,6 +88,8 @@ export function detectHighRequestRate(
         new Date(entries[a].timestamp).getTime() -
         new Date(entries[b].timestamp).getTime(),
     );
+
+    const flagged = new Set<number>();
     let left = 0;
     for (let right = 0; right < sorted.length; right += 1) {
       const rightTs = new Date(entries[sorted[right]].timestamp).getTime();
@@ -103,11 +105,39 @@ export function detectHighRequestRate(
         }
       }
     }
+
+    let run: number[] = [];
+    const flushRun = () => {
+      if (run.length === 0) return;
+      hits.push({
+        entryIndex: run[0],
+        rule: "high_request_rate",
+        entryCount: run.length,
+        relatedEntryIndexes: run.slice(),
+      });
+      run = [];
+    };
+
+    for (const index of sorted) {
+      if (!flagged.has(index)) {
+        flushRun();
+        continue;
+      }
+      if (run.length > 0) {
+        const prevTs = new Date(
+          entries[run[run.length - 1]].timestamp,
+        ).getTime();
+        const ts = new Date(entries[index].timestamp).getTime();
+        if (ts - prevTs > windowMs) {
+          flushRun();
+        }
+      }
+      run.push(index);
+    }
+    flushRun();
   });
 
-  return Array.from(flagged)
-    .sort((a, b) => a - b)
-    .map((entryIndex) => ({ entryIndex, rule: "high_request_rate" as const }));
+  return hits;
 }
 
 export function detectOffHours(

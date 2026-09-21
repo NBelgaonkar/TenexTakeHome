@@ -37,7 +37,9 @@ export async function runAnomalyPipeline(
   const explained = await explainAnomalies(plain, hits);
 
   return explained.map((item) => {
-    const row = entries[item.hit.entryIndex];
+    const representativeIndex =
+      item.hit.relatedEntryIndexes?.[0] ?? item.hit.entryIndex;
+    const row = entries[representativeIndex];
     return {
       session_id: sessionId,
       entry_id: row.id,

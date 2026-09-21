@@ -54,6 +54,16 @@ interface AnomalyRow {
   confidence: number | null;
   recommendedAction: string | null;
   severity: string;
+  entry: {
+    id: number;
+    timestamp: string;
+    sourceIp: string;
+    destUrl: string;
+    action: string;
+    bytesSent: number;
+    bytesReceived: number;
+    userAgent: string;
+  } | null;
 }
 
 type SortKey = "timestamp" | "sourceIp" | "action" | "bytes";
@@ -230,6 +240,52 @@ export function ResultsView({ sessionId }: { sessionId: string }) {
         )}
       </section>
 
+      {anomalies.length > 0 ? (
+        <section className="panel overflow-hidden">
+          <div className="border-b border-line px-4 py-3">
+            <h2 className="text-sm font-semibold">Flagged anomalies</h2>
+            <p className="mt-1 text-xs text-mist">
+              One row per finding. Request bursts are grouped, not listed per
+              event.
+            </p>
+          </div>
+          <ul>
+            {anomalies.map((flag) => (
+              <li
+                key={flag.id}
+                className="border-b border-line/50 px-4 py-3 last:border-b-0"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">
+                      {ruleLabel(flag.ruleTriggered)}{" "}
+                      <SeverityBadge severity={flag.severity} />
+                    </p>
+                    <p className="mt-1 font-mono text-[11px] text-mist">
+                      {flag.entry
+                        ? `${formatTimestamp(flag.entry.timestamp)} · ${flag.entry.sourceIp} → ${flag.entry.destUrl}`
+                        : `Entry ${flag.entryId}`}
+                    </p>
+                    <p className="mt-1 max-w-3xl text-sm text-mist">
+                      {flag.explanation ?? "No explanation available."}
+                    </p>
+                  </div>
+                  <div className="text-right font-mono text-xs text-mist">
+                    <p>
+                      Confidence{" "}
+                      {flag.confidence === null
+                        ? "—"
+                        : `${Math.round(flag.confidence * 100)}%`}
+                    </p>
+                    <p className="mt-1 text-foam">{flag.recommendedAction}</p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="panel overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
           <input
@@ -398,6 +454,14 @@ function EntryBlock({
           ) : (
             <span className="flex flex-wrap gap-1">
               {row.anomaly ? <SeverityBadge severity={row.anomaly.maxSeverity} /> : null}
+              {flags.map((flag) => (
+                <span
+                  key={flag.id}
+                  className="font-mono text-[10px] uppercase tracking-wider text-mist"
+                >
+                  {ruleLabel(flag.ruleTriggered)}
+                </span>
+              ))}
             </span>
           )}
         </td>

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ruleLabel } from "@/lib/anomaly/labels";
+import { loadRuleConfigFromEnv } from "@/lib/anomaly/rules";
 import type {
   AnomalyExplanation,
   AnomalyRule,
@@ -35,9 +36,10 @@ export async function explainAnomalies(
   hits: RuleHit[],
 ): Promise<FlaggedAnomaly[]> {
   const limited = hits.slice(0, LLM_ANOMALY_CAP);
+  const rateWindowSeconds = loadRuleConfigFromEnv().rateWindowSeconds;
   const flagged = limited.map((hit) => {
     const entry = entries[hit.entryIndex];
-    const context = buildContext(entries, hit);
+    const context = buildContext(entries, hit, rateWindowSeconds);
     return {
       hit,
       entry,
@@ -74,6 +76,7 @@ export async function explainAnomalies(
 function buildContext(
   entries: LogEntry[],
   hit: RuleHit,
+  rateWindowSeconds: number,
 ): Record<string, string | number> {
   const entry = entries[hit.entryIndex];
   const sameIp = entries.filter((e) => e.sourceIp === entry.sourceIp).length;
@@ -92,6 +95,8 @@ function buildContext(
     sessionSize: entries.length,
     sameIpCount: sameIp,
     sessionMedianBytes: median,
+    entryCount: hit.entryCount ?? 1,
+    rateWindowSeconds,
   };
 }
 
@@ -103,7 +108,7 @@ export function fallbackExplanation(
   switch (rule) {
     case "high_request_rate":
       return {
-        explanation: `Source IP ${entry.sourceIp} generated a burst of ${context.sameIpCount} requests in this session, exceeding the sliding-window rate threshold.`,
+        explanation: `IP ${entry.sourceIp} made ${context.entryCount} requests to ${entry.destUrl} in under ${context.rateWindowSeconds} seconds.`,
         confidence: 0.82,
         severity: "high",
         recommendedAction: "Investigate source IP",
@@ -195,7 +200,7 @@ async function callClaude(
     messages: [
       {
         role: "user",
-        content: `You are assisting a SOC analyst. For each flagged ZScaler web-proxy event, write a 1–2 sentence plain-English explanation, a confidence 0–1, severity, and a short recommended action (e.g. "investigate source IP" or "likely false positive, monitor"). Do not invent fields that are not in the JSON. Events:\n${JSON.stringify(payload)}`,
+        content: `You are assisting a SOC analyst. For each flagged ZScaler web-proxy finding, write a 1–2 sentence plain-English explanation, a confidence 0–1, severity, and a short recommended action (e.g. "investigate source IP" or "likely false positive, monitor"). high_request_rate findings are grouped bursts: explain the full window using context.entryCount (e.g. "IP X made N requests to Y in under 60 seconds"), not each line separately. Do not invent fields that are not in the JSON. Findings:\n${JSON.stringify(payload)}`,
       },
     ],
   });
