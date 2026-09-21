@@ -252,14 +252,14 @@ Vitest (watch: `npm run test:watch`). Tests live under `__tests__/`:
 
 Local `npm run dev` is the default way to run this take-home.
 
-Live demo: [ADD LIVE URL IF DEPLOYED]
+Live demo: [https://tenex-take-home-sooty.vercel.app/](https://tenex-take-home-sooty.vercel.app/). Supabase Auth is configured and working there (email/password login, invite-only; public signup stays off). Sign in with the seeded demo user. The password is not in this repo.
 
 Vercel (bonus):
 
 1. Push the repo to GitHub.
 2. Import the project on [Vercel](https://vercel.com/new) (Next.js preset).
 3. Set the env vars from the table above (Production and Preview). `ANTHROPIC_API_KEY` must be set in the host if you want Claude explanations. Never commit `.env.local`.
-4. In Supabase **Authentication → URL configuration**, set Site URL to the Vercel origin and add `https://<project>.vercel.app/**` to Redirect URLs.
+4. In Supabase **Authentication → URL configuration**, Site URL and Redirect URLs are already set for this deploy (`https://tenex-take-home-sooty.vercel.app` and `https://tenex-take-home-sooty.vercel.app/**`). For a new host, point them at that origin.
 5. Deploy. Signup stays disabled; only the seeded user can sign in.
 
 The upload route sets `maxDuration = 60`. Confirm the function timeout on your Vercel plan. A shorter limit can cut off parse plus Stage 2.
