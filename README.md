@@ -30,7 +30,9 @@ There is no separate Express server. All backend logic lives in Next.js Route Ha
 - `large_transfer` — `bytesSent + bytesReceived` ≥ `max(10 × session median, 5MB)`
 - `rare_domain` — registrable domain appears once in the session **or** the TLD is on a small denylist (`.xyz`, `.tk`, `.top`, `.click`, `.gq`, `.ml`, `.cf`, `.zip`)
 
-**Stage 2 — Claude explanation pass** (`lib/anomaly/llm.ts`). Runs **only** on Stage-1 hits (capped at 25), in a **single batched** tool-use call. Output: `explanation`, `confidence` (0–1), `severity`, `recommendedAction`.
+**Stage 2 — Claude explanation pass** (`lib/anomaly/llm.ts`). Runs **only** on Stage-1 hits, in a **single batched** tool-use call for a priority-capped subset. **All Stage-1 hits are stored.** Only the top 25 by priority (`large_transfer`, then `high_request_rate`, then `rare_domain`, then `off_hours`) are sent to Claude. Remaining hits keep their template explanations. Output: `explanation`, `confidence` (0–1), `severity`, `recommendedAction`.
+
+Confidence scores are self-reported by the model (or fixed template values when the API key is missing or the call fails). They are not calibrated probabilities.
 
 If `ANTHROPIC_API_KEY` is missing or the call fails, the same rows are still stored with template explanations so the demo works offline. **Claude is never used to parse raw logs.**
 
@@ -103,6 +105,18 @@ Do **not** deploy until env vars are set.
 3. Add the same env vars as `.env.example` (production + preview).
 4. In Supabase **Authentication → URL configuration**, set Site URL to the Vercel domain and add `https://<project>.vercel.app/**` to Redirect URLs.
 5. Deploy. Signup stays disabled; only the seeded user can sign in.
+
+## Known limitations
+
+- Rate limiter is an in-memory `Map` per process, not shared across serverless instances.
+- Parse and the LLM explanation pass run synchronously on upload (`maxDuration = 60`).
+- `rare_domain` flags any registrable domain seen once, so it is noisy on large real logs.
+- Confidence scores are not calibrated probabilities.
+- Only the ZScaler NSS web tab-delimited format is supported.
+
+## AI usage during development
+
+Cursor was used to draft and iterate on the parser, anomaly pipeline, UI, tests, and docs. I reviewed the generated code and can explain it in an interview. Runtime Claude usage is only the Stage 2 explanation pass above.
 
 ## Tests
 

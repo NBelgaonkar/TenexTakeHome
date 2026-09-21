@@ -12,4 +12,4 @@ Threat → mitigation (one line each):
 - Rate limiting → login (5/min/IP) and upload (10/hour/user); in-memory for this take-home, Redis/Upstash in production.
 - Secrets → `.env.example` committed with placeholders; real `.env.local` is gitignored.
 - Public signup → disabled in Supabase Auth; this app has a login page only (no registration UI).
-- LLM scope → Claude sees only Stage-1 flagged rows (capped), never the raw unparsed file and never used as an auth oracle.
+- LLM scope → Claude sees only a priority-capped subset of Stage-1 hits, never the raw unparsed file and never used as an auth oracle.

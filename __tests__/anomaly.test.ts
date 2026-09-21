@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { fallbackExplanation } from "@/lib/anomaly/llm";
+import { fallbackExplanation, selectHitsForLlm } from "@/lib/anomaly/llm";
+import { runAnomalyPipeline } from "@/lib/anomaly/pipeline";
 import {
   DEFAULT_RULE_CONFIG,
   detectAnomalies,
@@ -11,7 +12,8 @@ import {
   detectRareDomain,
 } from "@/lib/anomaly/rules";
 import { parseLogFile } from "@/lib/parser/zscaler";
-import type { LogEntry } from "@/lib/types";
+import type { LogEntry, RuleHit } from "@/lib/types";
+import { LLM_ANOMALY_CAP } from "@/lib/types";
 
 function entry(overrides: Partial<LogEntry>): LogEntry {
   return {
@@ -203,5 +205,80 @@ describe("anomalous traffic fixture", () => {
     // This ~4.2MB Zoom recording must stay unflagged; 15–20MB would not.
     expect(total).toBeGreaterThan(3 * 1024 * 1024);
     expect(total).toBeLessThan(DEFAULT_RULE_CONFIG.transferFloorBytes);
+  });
+
+  it("yields all four rule types", () => {
+    const rules = new Set(
+      detectAnomalies(entries, DEFAULT_RULE_CONFIG).map((hit) => hit.rule),
+    );
+    expect(rules.has("high_request_rate")).toBe(true);
+    expect(rules.has("off_hours")).toBe(true);
+    expect(rules.has("large_transfer")).toBe(true);
+    expect(rules.has("rare_domain")).toBe(true);
+  });
+});
+
+describe("LLM cap", () => {
+  it("persists every Stage 1 hit, including large_transfer and rare_domain past 25 off_hours", async () => {
+    const previousKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+
+    try {
+      const weekend = Array.from({ length: 26 }, (_, i) =>
+        entry({
+          timestamp: new Date(Date.UTC(2024, 2, 16, 12, i * 2, 0)).toISOString(),
+          destUrl: "https://www.google.com/",
+        }),
+      );
+      const large = entry({
+        timestamp: "2024-03-11T15:00:00.000Z",
+        destUrl: "https://www.google.com/",
+        bytesSent: 1024,
+        bytesReceived: 50 * 1024 * 1024,
+      });
+      const rare = entry({
+        timestamp: "2024-03-11T15:05:00.000Z",
+        destUrl: "https://steal-session.xyz/login",
+      });
+      const entries = [...weekend, large, rare];
+      const hits = detectAnomalies(entries, DEFAULT_RULE_CONFIG);
+      expect(hits.length).toBeGreaterThan(25);
+      expect(hits.some((hit) => hit.rule === "off_hours")).toBe(true);
+      expect(hits.some((hit) => hit.rule === "large_transfer")).toBe(true);
+      expect(hits.some((hit) => hit.rule === "rare_domain")).toBe(true);
+
+      const withIds = entries.map((row, index) => ({ ...row, id: index + 1 }));
+      const rows = await runAnomalyPipeline("test-session", withIds);
+      expect(rows).toHaveLength(hits.length);
+      expect(rows.some((row) => row.rule_triggered === "large_transfer")).toBe(
+        true,
+      );
+      expect(rows.some((row) => row.rule_triggered === "rare_domain")).toBe(
+        true,
+      );
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = previousKey;
+      }
+    }
+  });
+
+  it("selectHitsForLlm never exceeds the cap and ranks large_transfer ahead of off_hours", () => {
+    const hits: RuleHit[] = [
+      ...Array.from({ length: 30 }, (_, i) => ({
+        entryIndex: i,
+        rule: "off_hours" as const,
+      })),
+      { entryIndex: 30, rule: "large_transfer" },
+    ];
+    const selected = selectHitsForLlm(hits, LLM_ANOMALY_CAP);
+    expect(selected.length).toBeLessThanOrEqual(LLM_ANOMALY_CAP);
+    expect(selected).toHaveLength(LLM_ANOMALY_CAP);
+    expect(selected[0].rule).toBe("large_transfer");
+    expect(selected.slice(1).every((hit) => hit.rule === "off_hours")).toBe(
+      true,
+    );
   });
 });

@@ -258,7 +258,7 @@ export function ResultsView({ sessionId }: { sessionId: string }) {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-medium">
-                      {ruleLabel(flag.ruleTriggered)}{" "}
+                      {findingHeading(flag)}{" "}
                       <SeverityBadge severity={flag.severity} />
                     </p>
                     <p className="mt-1 font-mono text-[11px] text-mist">
@@ -473,7 +473,7 @@ function EntryBlock({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-medium">
-                      {ruleLabel(flag.ruleTriggered)}{" "}
+                      {findingHeading(flag)}{" "}
                       <SeverityBadge severity={flag.severity} />
                     </p>
                     <p className="mt-1 max-w-3xl text-sm text-mist">
@@ -496,6 +496,18 @@ function EntryBlock({
         : null}
     </>
   );
+}
+
+function findingHeading(flag: AnomalyRow): string {
+  if (flag.ruleTriggered !== "high_request_rate") {
+    return ruleLabel(flag.ruleTriggered);
+  }
+  const match = flag.explanation?.match(/made (\d+) requests/i);
+  const count = match ? Number.parseInt(match[1], 10) : NaN;
+  if (Number.isFinite(count) && count > 0) {
+    return `High request rate (${count} requests; only the first is highlighted in the events table)`;
+  }
+  return "High request rate (grouped burst; only the first request is highlighted in the events table)";
 }
 
 function StatCard({
